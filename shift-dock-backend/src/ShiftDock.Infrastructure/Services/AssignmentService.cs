@@ -44,6 +44,29 @@ public class AssignmentService : IAssignmentService
         return _mapper.Map<List<WorkerAssignmentResponse>>(assignments);
     }
 
+    public async Task<IEnumerable<WorkerAssignmentResponse>> GetAssignmentsByProjectAsync(Guid organizationId, Guid projectId, Guid currentUserId, CancellationToken cancellationToken = default)
+    {
+        // Verify the project belongs to the organization and user has access
+        var project = await _context.Projects
+            .FirstOrDefaultAsync(p => p.Id == projectId.ToString() && p.OrganizationId == organizationId.ToString(), cancellationToken);
+        
+        if (project == null)
+        {
+            throw new KeyNotFoundException($"Project with ID {projectId} not found in organization {organizationId}");
+        }
+
+        // Get all assignments for shifts in this project
+        var assignments = await _context.WorkerAssignments
+            .Include(a => a.User)
+            .Include(a => a.Shift)
+            .ThenInclude(s => s.Project)
+            .Where(a => a.Shift.ProjectId == projectId.ToString())
+            .OrderByDescending(a => a.CreatedAt)
+            .ToListAsync(cancellationToken);
+        
+        return _mapper.Map<List<WorkerAssignmentResponse>>(assignments);
+    }
+
     public async Task<IEnumerable<WorkerAssignmentResponse>> GetMyAssignmentsAsync(Guid userId, CancellationToken cancellationToken = default)
     {
         var assignments = await _context.WorkerAssignments
@@ -187,6 +210,113 @@ public class AssignmentService : IAssignmentService
             .FirstOrDefaultAsync(a => a.Id == assignment.Id, cancellationToken);
 
         return _mapper.Map<WorkerAssignmentResponse>(updatedAssignment);
+    }
+
+    public async Task<SyncProjectAssignmentsResponse> SyncProjectAssignmentsAsync(Guid organizationId, Guid projectId, SyncProjectAssignmentsRequest request, Guid currentUserId, CancellationToken cancellationToken = default)
+    {
+        // Verify the project belongs to the organization
+        var project = await _context.Projects
+            .FirstOrDefaultAsync(p => p.Id == projectId.ToString() && p.OrganizationId == organizationId.ToString(), cancellationToken);
+        
+        if (project == null)
+        {
+            throw new KeyNotFoundException($"Project with ID {projectId} not found in organization {organizationId}");
+        }
+
+        // Get all existing assignments for this project
+        var existingAssignments = await _context.WorkerAssignments
+            .Include(a => a.Shift)
+            .Where(a => a.Shift.ProjectId == projectId.ToString())
+            .ToListAsync(cancellationToken);
+
+        int added = 0, updated = 0, deleted = 0;
+
+        // Create lookup for new assignments
+        var newAssignmentsLookup = request.Assignments
+            .GroupBy(a => new { ShiftId = a.ShiftId, UserId = a.UserId })
+            .ToDictionary(g => g.Key, g => g.First());
+
+        // Delete assignments not in the new list
+        foreach (var existing in existingAssignments)
+        {
+            var key = new { ShiftId = existing.ShiftId, UserId = existing.UserId };
+            if (!newAssignmentsLookup.ContainsKey(key))
+            {
+                await _assignmentRepository.DeleteAsync(existing, cancellationToken);
+                deleted++;
+            }
+            else
+            {
+                // Update existing assignment if notes changed
+                var newAssignment = newAssignmentsLookup[key];
+                if (existing.Notes != newAssignment.Notes)
+                {
+                    existing.Notes = newAssignment.Notes;
+                    existing.UpdatedAt = DateTime.UtcNow;
+                    await _assignmentRepository.UpdateAsync(existing, cancellationToken);
+                }
+                updated++;
+            }
+        }
+
+        // Add new assignments
+        var existingAssignmentsLookup = existingAssignments
+            .GroupBy(a => new { ShiftId = a.ShiftId, UserId = a.UserId })
+            .ToDictionary(g => g.Key);
+
+        foreach (var newAssignment in request.Assignments)
+        {
+            var key = new { ShiftId = newAssignment.ShiftId, UserId = newAssignment.UserId };
+            if (!existingAssignmentsLookup.ContainsKey(key))
+            {
+                // Verify shift belongs to the project
+                var shift = await _context.Shifts
+                    .FirstOrDefaultAsync(s => s.Id == newAssignment.ShiftId && s.ProjectId == projectId.ToString(), cancellationToken);
+                
+                if (shift == null)
+                {
+                    continue; // Skip invalid shifts
+                }
+
+                // Verify user exists
+                var user = await _userRepository.GetByIdAsync(newAssignment.UserId, cancellationToken);
+                if (user == null)
+                {
+                    continue; // Skip invalid users
+                }
+
+                var assignment = new WorkerAssignment
+                {
+                    ShiftId = newAssignment.ShiftId,
+                    UserId = newAssignment.UserId,
+                    Status = "Pending",
+                    Notes = newAssignment.Notes,
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                await _assignmentRepository.AddAsync(assignment, cancellationToken);
+                added++;
+            }
+        }
+
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Get current assignments after sync
+        var currentAssignments = await _context.WorkerAssignments
+            .Include(a => a.User)
+            .Include(a => a.Shift)
+            .ThenInclude(s => s.Project)
+            .Where(a => a.Shift.ProjectId == projectId.ToString())
+            .OrderByDescending(a => a.CreatedAt)
+            .ToListAsync(cancellationToken);
+
+        return new SyncProjectAssignmentsResponse
+        {
+            Added = added,
+            Updated = updated,
+            Deleted = deleted,
+            CurrentAssignments = _mapper.Map<List<WorkerAssignmentResponse>>(currentAssignments)
+        };
     }
 
     public async Task<bool> RemoveAssignmentAsync(Guid assignmentId, Guid currentUserId, CancellationToken cancellationToken = default)

@@ -38,6 +38,41 @@ public class AssignmentsController : ControllerBase
     }
 
     /// <summary>
+    /// Gets all assignments for a project
+    /// </summary>
+    /// <param name="organizationId">Organization ID</param>
+    /// <param name="projectId">Project ID</param>
+    /// <returns>List of assignments</returns>
+    [HttpGet("/api/organizations/{organizationId}/projects/{projectId}/assignments")]
+    public async Task<ActionResult<ApiResponse<IEnumerable<WorkerAssignmentResponse>>>> GetProjectAssignments(Guid organizationId, Guid projectId)
+    {
+        var userId = User.FindFirst("userId")?.Value;
+        if (string.IsNullOrEmpty(userId))
+            return Unauthorized();
+
+        var result = await _assignmentService.GetAssignmentsByProjectAsync(organizationId, projectId, Guid.Parse(userId));
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Syncs assignments for a project - adds new, updates existing, deletes removed
+    /// </summary>
+    /// <param name="organizationId">Organization ID</param>
+    /// <param name="projectId">Project ID</param>
+    /// <param name="request">Complete list of assignments (shift-user pairs)</param>
+    /// <returns>Sync summary with counts and current assignments</returns>
+    [HttpPost("/api/organizations/{organizationId}/projects/{projectId}/assignments/sync")]
+    public async Task<ActionResult<ApiResponse<SyncProjectAssignmentsResponse>>> SyncProjectAssignments(Guid organizationId, Guid projectId, [FromBody] SyncProjectAssignmentsRequest request)
+    {
+        var userId = User.FindFirst("userId")?.Value;
+        if (string.IsNullOrEmpty(userId))
+            return Unauthorized();
+
+        var result = await _assignmentService.SyncProjectAssignmentsAsync(organizationId, projectId, request, Guid.Parse(userId));
+        return Ok(result);
+    }
+
+    /// <summary>
     /// Gets all assignments for current user
     /// </summary>
     /// <returns>List of user's assignments</returns>
