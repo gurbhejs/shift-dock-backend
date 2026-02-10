@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ShiftDock.API/ShiftDock.API.csproj" />
+    <Project Path="src/ShiftDock.Application/ShiftDock.Application.csproj" />
+    <Project Path="src/ShiftDock.Domain/ShiftDock.Domain.csproj" />
+    <Project Path="src/ShiftDock.Infrastructure/ShiftDock.Infrastructure.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,6 @@
+@ShiftDock.API_HostAddress = http://localhost:5182
+
+GET {{ShiftDock.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
