@@ -8,6 +8,4 @@ public class ProjectReportResponse
     public int CompletedShifts { get; set; }
     public int TotalWorkers { get; set; }
     public decimal TotalCost { get; set; }
-    public DateTime? StartDate { get; set; }
-    public DateTime? EndDate { get; set; }
 }

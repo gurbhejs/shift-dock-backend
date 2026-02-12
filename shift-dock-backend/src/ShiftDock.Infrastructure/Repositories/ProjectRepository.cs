@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using ShiftDock.Application.Interfaces.Repositories;
 using ShiftDock.Domain.Entities;
+using ShiftDock.Domain.Enums;
 using ShiftDock.Infrastructure.Data;
 
 namespace ShiftDock.Infrastructure.Repositories;
@@ -42,7 +43,7 @@ public class ProjectRepository : IProjectRepository
     public async Task<int> GetActiveCountByOrganizationIdAsync(string organizationId, CancellationToken cancellationToken = default)
     {
         return await _context.Projects
-            .Where(p => p.OrganizationId == organizationId && p.Status == "Active")
+            .Where(p => p.OrganizationId == organizationId && p.ContractStatus == ContractStatus.Active)
             .CountAsync(cancellationToken);
     }
 

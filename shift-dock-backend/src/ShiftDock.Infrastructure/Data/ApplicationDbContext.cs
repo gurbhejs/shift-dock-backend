@@ -75,9 +75,13 @@ public class ApplicationDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.OrganizationId);
             entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
-            entity.Property(e => e.Description).HasMaxLength(1000);
-            entity.Property(e => e.Location).HasMaxLength(500);
-            entity.Property(e => e.Status).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.Location).IsRequired().HasMaxLength(500);
+            entity.Property(e => e.Latitude).HasMaxLength(50);
+            entity.Property(e => e.Longitude).HasMaxLength(50);
+            entity.Property(e => e.Notes).HasMaxLength(2000);
+            entity.Property(e => e.WorkType).IsRequired();
+            entity.Property(e => e.Rate).IsRequired().HasPrecision(18, 2);
+            entity.Property(e => e.ContractStatus).IsRequired().HasConversion<string>();
             entity.Property(e => e.CreatedAt).IsRequired();
 
             entity.HasOne(e => e.Organization)

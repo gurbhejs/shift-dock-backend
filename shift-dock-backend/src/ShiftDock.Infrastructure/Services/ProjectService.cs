@@ -42,11 +42,13 @@ public class ProjectService : IProjectService
         {
             OrganizationId = organizationId.ToString(),
             Name = request.Name,
-            Description = request.Description,
             Location = request.Location,
-            Status = "Active",
-            StartDate = request.StartDate,
-            EndDate = request.EndDate,
+            Latitude = request.Latitude,
+            Longitude = request.Longitude,
+            Notes = request.Notes,
+            WorkType = request.WorkType,
+            Rate = request.Rate,
+            ContractStatus = request.ContractStatus,
             CreatedAt = DateTime.UtcNow
         };
 
@@ -86,29 +88,39 @@ public class ProjectService : IProjectService
             project.Name = request.Name;
         }
 
-        if (!string.IsNullOrEmpty(request.Description))
-        {
-            project.Description = request.Description;
-        }
-
         if (!string.IsNullOrEmpty(request.Location))
         {
             project.Location = request.Location;
         }
 
-        if (!string.IsNullOrEmpty(request.Status))
+        if (request.Latitude != null)
         {
-            project.Status = request.Status;
+            project.Latitude = request.Latitude;
         }
 
-        if (request.StartDate.HasValue)
+        if (request.Longitude != null)
         {
-            project.StartDate = request.StartDate;
+            project.Longitude = request.Longitude;
         }
 
-        if (request.EndDate.HasValue)
+        if (request.Notes != null)
         {
-            project.EndDate = request.EndDate;
+            project.Notes = request.Notes;
+        }
+
+        if (request.WorkType.HasValue)
+        {
+            project.WorkType = request.WorkType.Value;
+        }
+
+        if (request.Rate.HasValue)
+        {
+            project.Rate = request.Rate.Value;
+        }
+
+        if (request.ContractStatus.HasValue)
+        {
+            project.ContractStatus = request.ContractStatus.Value;
         }
 
         project.UpdatedAt = DateTime.UtcNow;
@@ -216,29 +228,39 @@ public class ProjectService : IProjectService
             project.Name = request.Name;
         }
 
-        if (!string.IsNullOrEmpty(request.Description))
-        {
-            project.Description = request.Description;
-        }
-
         if (!string.IsNullOrEmpty(request.Location))
         {
             project.Location = request.Location;
         }
 
-        if (!string.IsNullOrEmpty(request.Status))
+        if (request.Latitude != null)
         {
-            project.Status = request.Status;
+            project.Latitude = request.Latitude;
         }
 
-        if (request.StartDate.HasValue)
+        if (request.Longitude != null)
         {
-            project.StartDate = request.StartDate;
+            project.Longitude = request.Longitude;
         }
 
-        if (request.EndDate.HasValue)
+        if (request.Notes != null)
         {
-            project.EndDate = request.EndDate;
+            project.Notes = request.Notes;
+        }
+
+        if (request.WorkType.HasValue)
+        {
+            project.WorkType = request.WorkType.Value;
+        }
+
+        if (request.Rate.HasValue)
+        {
+            project.Rate = request.Rate.Value;
+        }
+
+        if (request.ContractStatus.HasValue)
+        {
+            project.ContractStatus = request.ContractStatus.Value;
         }
 
         project.UpdatedAt = DateTime.UtcNow;

@@ -154,9 +154,7 @@ public class ReportService : IReportService
                 TotalShifts = totalShifts,
                 CompletedShifts = completedShifts,
                 TotalWorkers = 0, // Calculate if needed
-                TotalCost = 0m, // Calculate if needed
-                StartDate = project.StartDate,
-                EndDate = project.EndDate
+                TotalCost = 0m // Calculate if needed
             });
         }
 
