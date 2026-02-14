@@ -13,4 +13,5 @@ public interface IAssignmentService
     Task<SyncProjectAssignmentsResponse> SyncProjectAssignmentsAsync(Guid organizationId, Guid projectId, SyncProjectAssignmentsRequest request, Guid currentUserId, CancellationToken cancellationToken = default);
     Task<WorkerAssignmentResponse> UpdateAssignmentStatusAsync(Guid assignmentId, UpdateAssignmentStatusRequest request, Guid currentUserId, CancellationToken cancellationToken = default);
     Task<bool> RemoveAssignmentAsync(Guid assignmentId, Guid currentUserId, CancellationToken cancellationToken = default);
+    Task UnassignFutureProjectShiftsAsync(string projectId, string projectName, CancellationToken cancellationToken = default);
 }

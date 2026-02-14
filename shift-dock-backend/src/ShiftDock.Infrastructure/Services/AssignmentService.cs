@@ -16,6 +16,7 @@ public class AssignmentService : IAssignmentService
     private readonly IUnitOfWork _unitOfWork;
     private readonly IMapper _mapper;
     private readonly ApplicationDbContext _context;
+    private readonly INotificationService _notificationService;
 
     public AssignmentService(
         IAssignmentRepository assignmentRepository,
@@ -23,7 +24,8 @@ public class AssignmentService : IAssignmentService
         IUserRepository userRepository,
         IUnitOfWork unitOfWork,
         IMapper mapper,
-        ApplicationDbContext context)
+        ApplicationDbContext context,
+        INotificationService notificationService)
     {
         _assignmentRepository = assignmentRepository;
         _shiftRepository = shiftRepository;
@@ -31,6 +33,7 @@ public class AssignmentService : IAssignmentService
         _unitOfWork = unitOfWork;
         _mapper = mapper;
         _context = context;
+        _notificationService = notificationService;
     }
 
     public async Task<IEnumerable<WorkerAssignmentResponse>> GetAssignmentsByShiftAsync(Guid shiftId, Guid currentUserId, CancellationToken cancellationToken = default)
@@ -112,6 +115,13 @@ public class AssignmentService : IAssignmentService
         await _assignmentRepository.AddAsync(assignment, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+        // Send notification to the user
+        await _notificationService.SendNotificationAsync(
+            Guid.Parse(workerId),
+            "Shift Assigned",
+            $"You have been assigned to a shift on {shift.ShiftDate} from {shift.StartTime} to {shift.EndTime}.",
+            cancellationToken);
+
         // Reload with includes
         var createdAssignment = await _context.WorkerAssignments
             .Include(a => a.User)
@@ -166,6 +176,14 @@ public class AssignmentService : IAssignmentService
                 await _assignmentRepository.AddAsync(assignment, cancellationToken);
             }
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            // Send notifications to all assigned workers
+            var userIds = assignments.Select(a => Guid.Parse(a.UserId)).ToList();
+            await _notificationService.SendBulkNotificationsAsync(
+                userIds,
+                "Shift Assigned",
+                $"You have been assigned to a shift on {shift.ShiftDate} from {shift.StartTime} to {shift.EndTime}.",
+                cancellationToken);
         }
 
         // Reload with includes
@@ -236,12 +254,16 @@ public class AssignmentService : IAssignmentService
             .GroupBy(a => new { ShiftId = a.ShiftId, UserId = a.UserId })
             .ToDictionary(g => g.Key, g => g.First());
 
+        // Track deleted assignments for notifications
+        var deletedAssignments = new List<WorkerAssignment>();
+
         // Delete assignments not in the new list
         foreach (var existing in existingAssignments)
         {
             var key = new { ShiftId = existing.ShiftId, UserId = existing.UserId };
             if (!newAssignmentsLookup.ContainsKey(key))
             {
+                deletedAssignments.Add(existing);
                 await _assignmentRepository.DeleteAsync(existing, cancellationToken);
                 deleted++;
             }
@@ -263,6 +285,9 @@ public class AssignmentService : IAssignmentService
         var existingAssignmentsLookup = existingAssignments
             .GroupBy(a => new { ShiftId = a.ShiftId, UserId = a.UserId })
             .ToDictionary(g => g.Key);
+
+        // Track new assignments for notifications
+        var newAssignmentsCreated = new List<(string UserId, string ShiftDate, string StartTime, string EndTime)>();
 
         foreach (var newAssignment in request.Assignments)
         {
@@ -295,11 +320,38 @@ public class AssignmentService : IAssignmentService
                 };
 
                 await _assignmentRepository.AddAsync(assignment, cancellationToken);
+                newAssignmentsCreated.Add((newAssignment.UserId, shift.ShiftDate, shift.StartTime, shift.EndTime));
                 added++;
             }
         }
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Send notifications for deleted assignments
+        if (deletedAssignments.Any())
+        {
+            foreach (var deletedAssignment in deletedAssignments)
+            {
+                await _notificationService.SendNotificationAsync(
+                    Guid.Parse(deletedAssignment.UserId),
+                    "Shift Unassigned",
+                    $"You have been unassigned from a shift on {deletedAssignment.Shift.ShiftDate} from {deletedAssignment.Shift.StartTime} to {deletedAssignment.Shift.EndTime}.",
+                    cancellationToken);
+            }
+        }
+
+        // Send notifications for new assignments
+        if (newAssignmentsCreated.Any())
+        {
+            foreach (var (userId, shiftDate, startTime, endTime) in newAssignmentsCreated)
+            {
+                await _notificationService.SendNotificationAsync(
+                    Guid.Parse(userId),
+                    "Shift Assigned",
+                    $"You have been assigned to a shift on {shiftDate} from {startTime} to {endTime}.",
+                    cancellationToken);
+            }
+        }
 
         // Get current assignments after sync
         var currentAssignments = await _context.WorkerAssignments
@@ -321,14 +373,87 @@ public class AssignmentService : IAssignmentService
 
     public async Task<bool> RemoveAssignmentAsync(Guid assignmentId, Guid currentUserId, CancellationToken cancellationToken = default)
     {
-        var assignment = await _assignmentRepository.GetByIdAsync(assignmentId.ToString(), cancellationToken);
+        var assignment = await _context.WorkerAssignments
+            .Include(a => a.Shift)
+            .FirstOrDefaultAsync(a => a.Id == assignmentId.ToString(), cancellationToken);
+        
         if (assignment == null)
         {
             throw new KeyNotFoundException($"Assignment with ID {assignmentId} not found");
         }
 
+        // Store details before deletion for notification
+        var userId = assignment.UserId;
+        var shiftDate = assignment.Shift.ShiftDate;
+        var startTime = assignment.Shift.StartTime;
+        var endTime = assignment.Shift.EndTime;
+
         await _assignmentRepository.DeleteAsync(assignment, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Send notification to the user
+        await _notificationService.SendNotificationAsync(
+            Guid.Parse(userId),
+            "Shift Unassigned",
+            $"You have been unassigned from a shift on {shiftDate} from {startTime} to {endTime}.",
+            cancellationToken);
+
         return true;
+    }
+
+    public async Task UnassignFutureProjectShiftsAsync(string projectId, string projectName, CancellationToken cancellationToken = default)
+    {
+        var today = DateTime.UtcNow.ToString("yyyy-MM-dd");
+
+        // Get all future shifts for this project
+        var futureShifts = await _context.Shifts
+            .Where(s => s.ProjectId == projectId && string.Compare(s.ShiftDate, today) >= 0)
+            .ToListAsync(cancellationToken);
+
+        if (!futureShifts.Any())
+        {
+            return;
+        }
+
+        var shiftIds = futureShifts.Select(s => s.Id).ToList();
+
+        // Get all assignments for future shifts
+        var assignments = await _context.WorkerAssignments
+            .Include(a => a.Shift)
+            .Where(a => shiftIds.Contains(a.ShiftId))
+            .ToListAsync(cancellationToken);
+
+        if (!assignments.Any())
+        {
+            return;
+        }
+
+        // Group assignments by user for batch notification
+        var userAssignments = assignments.GroupBy(a => a.UserId).ToList();
+
+        // Delete all assignments using the repository pattern
+        foreach (var assignment in assignments)
+        {
+            await _assignmentRepository.DeleteAsync(assignment, cancellationToken);
+        }
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Send notifications to each affected user
+        foreach (var userGroup in userAssignments)
+        {
+            var userId = userGroup.Key;
+            var assignmentCount = userGroup.Count();
+            var shiftDates = userGroup.Select(a => a.Shift.ShiftDate).Distinct().OrderBy(d => d).ToList();
+
+            var message = assignmentCount == 1
+                ? $"Your shift assignment for project '{projectName}' on {shiftDates.First()} has been cancelled due to project status change."
+                : $"Your {assignmentCount} shift assignments for project '{projectName}' have been cancelled due to project status change.";
+
+            await _notificationService.SendNotificationAsync(
+                Guid.Parse(userId),
+                "Shifts Cancelled",
+                message,
+                cancellationToken);
+        }
     }
 }

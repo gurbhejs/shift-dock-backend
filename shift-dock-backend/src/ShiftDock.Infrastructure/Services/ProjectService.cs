@@ -13,6 +13,7 @@ public class ProjectService : IProjectService
     private readonly IProjectRepository _projectRepository;
     private readonly IOrganizationRepository _organizationRepository;
     private readonly IShiftRepository _shiftRepository;
+    private readonly IAssignmentService _assignmentService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IMapper _mapper;
 
@@ -20,12 +21,14 @@ public class ProjectService : IProjectService
         IProjectRepository projectRepository,
         IOrganizationRepository organizationRepository,
         IShiftRepository shiftRepository,
+        IAssignmentService assignmentService,
         IUnitOfWork unitOfWork,
         IMapper mapper)
     {
         _projectRepository = projectRepository;
         _organizationRepository = organizationRepository;
         _shiftRepository = shiftRepository;
+        _assignmentService = assignmentService;
         _unitOfWork = unitOfWork;
         _mapper = mapper;
     }
@@ -83,6 +86,9 @@ public class ProjectService : IProjectService
             throw new KeyNotFoundException($"Project with ID {projectId} not found");
         }
 
+        // Track original status to detect changes
+        var originalStatus = project.ContractStatus;
+
         if (!string.IsNullOrEmpty(request.Name))
         {
             project.Name = request.Name;
@@ -127,6 +133,17 @@ public class ProjectService : IProjectService
 
         await _projectRepository.UpdateAsync(project, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Check if status changed from Active to inactive (Paused, Expired, or Cancelled)
+        if (originalStatus == ContractStatus.Active && 
+            request.ContractStatus.HasValue && 
+            (request.ContractStatus.Value == ContractStatus.Paused || 
+             request.ContractStatus.Value == ContractStatus.Expired || 
+             request.ContractStatus.Value == ContractStatus.Cancelled))
+        {
+            // Unassign all future shifts and notify users via AssignmentService
+            await _assignmentService.UnassignFutureProjectShiftsAsync(projectId.ToString(), project.Name, cancellationToken);
+        }
 
         return _mapper.Map<ProjectResponse>(project);
     }
@@ -192,7 +209,14 @@ public class ProjectService : IProjectService
 
     public async Task<ProjectResponse> UpdateProjectAsync(string projectId, UpdateProjectRequest request, CancellationToken cancellationToken = default)
     {
-        return await UpdateProjectAsync(Guid.Parse(projectId), Guid.Empty, Guid.Empty, request, cancellationToken);
+        // Get the project first to access its OrganizationId
+        var project = await _projectRepository.GetByIdAsync(projectId, cancellationToken);
+        if (project == null)
+        {
+            throw new KeyNotFoundException($"Project with ID {projectId} not found");
+        }
+        
+        return await UpdateProjectAsync(Guid.Parse(projectId), Guid.Parse(project.OrganizationId), Guid.Empty, request, cancellationToken);
     }
 
     public async Task DeleteProjectAsync(string projectId, CancellationToken cancellationToken = default)
@@ -223,52 +247,8 @@ public class ProjectService : IProjectService
             throw new KeyNotFoundException($"Project with ID {projectId} not found");
         }
 
-        if (!string.IsNullOrEmpty(request.Name))
-        {
-            project.Name = request.Name;
-        }
-
-        if (!string.IsNullOrEmpty(request.Location))
-        {
-            project.Location = request.Location;
-        }
-
-        if (request.Latitude != null)
-        {
-            project.Latitude = request.Latitude;
-        }
-
-        if (request.Longitude != null)
-        {
-            project.Longitude = request.Longitude;
-        }
-
-        if (request.Notes != null)
-        {
-            project.Notes = request.Notes;
-        }
-
-        if (request.WorkType.HasValue)
-        {
-            project.WorkType = request.WorkType.Value;
-        }
-
-        if (request.Rate.HasValue)
-        {
-            project.Rate = request.Rate.Value;
-        }
-
-        if (request.ContractStatus.HasValue)
-        {
-            project.ContractStatus = request.ContractStatus.Value;
-        }
-
-        project.UpdatedAt = DateTime.UtcNow;
-
-        await _projectRepository.UpdateAsync(project, cancellationToken);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        return _mapper.Map<ProjectResponse>(project);
+        // Use the main UpdateProjectAsync method that handles status changes
+        return await UpdateProjectAsync(projectId, Guid.Parse(project.OrganizationId), currentUserId, request, cancellationToken);
     }
 
     public async Task<bool> DeleteProjectAsync(Guid projectId, Guid currentUserId, CancellationToken cancellationToken = default)
